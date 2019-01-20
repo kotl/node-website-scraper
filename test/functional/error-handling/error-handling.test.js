@@ -10,14 +10,6 @@ const mockDirname = __dirname + '/mocks';
 let scraper;
 
 describe('Functional error handling', function() {
-	const options = {
-		urls: [ 'http://example.com/' ],
-		directory: testDirname,
-		subdirectories: null,
-		recursive: true,
-		maxDepth: 2,
-		sources: []
-	};
 
 	beforeEach(function () {
 		nock.cleanAll();
@@ -31,6 +23,14 @@ describe('Functional error handling', function() {
 		nock('http://example.com/').get('/page5.html').delay(500).reply(200, 'ok');
 		nock('http://example.com/').get('/page6.html').delay(600).reply(200, 'ok');
 
+		var options = {
+			urls: [ 'http://example.com/' ],
+			directory: testDirname,
+			subdirectories: null,
+			recursive: true,
+			maxDepth: 2,
+			sources: []
+		};
 		scraper = new Scraper(options);
 	});
 
@@ -41,52 +41,34 @@ describe('Functional error handling', function() {
 	});
 
 	describe('FS Error', function () {
-		let saveResourceStub, handleErrorStub, failingFsPlugin;
+		let loadToFsStub, handleErrorSpy;
 
 		beforeEach(function() {
-			saveResourceStub = sinon.stub().resolves().onCall(2).rejects(new Error('FS FAILED!'));
-			handleErrorStub = sinon.stub().resolves();
-
-			class FailingFSPlugin {
-				apply(registerAction) {
-					registerAction('saveResource', saveResourceStub);
-					registerAction('error', handleErrorStub)
-				}
-			}
-
-			failingFsPlugin = new FailingFSPlugin();
+			scraper.resourceSaver.loadedResources = [1, 2];
+			loadToFsStub = sinon.stub(scraper.resourceSaver, 'saveResource').resolves();
+			loadToFsStub.onCall(2).rejects(new Error('FS FAILED!'));
+			handleErrorSpy = sinon.spy(scraper.resourceSaver, 'errorCleanup');
 		});
 
 		it('should remove directory and immediately reject on fs error if ignoreErrors is false', function () {
-			scraper = new Scraper({
-				...options,
-				ignoreErrors: false,
-				plugins: [
-					failingFsPlugin
-				]
-			});
+			scraper.options.ignoreErrors = false;
 
 			return scraper.scrape().then(function() {
 				should(true).be.eql(false);
 			}).catch(function (err) {
 				should(err.message).be.eql('FS FAILED!');
-				should(saveResourceStub.callCount).be.eql(3);
-				should(handleErrorStub.callCount).be.eql(1);
+				should(loadToFsStub.callCount).be.eql(3);
+				should(handleErrorSpy.callCount).be.eql(1);
+				fs.existsSync(testDirname).should.be.eql(false);
 			});
 		});
 
 		it('should ignore fs error if ignoreErrors is true', function () {
-			scraper = new Scraper({
-				...options,
-				ignoreErrors: true,
-				plugins: [
-					failingFsPlugin
-				]
-			});
+			scraper.options.ignoreErrors = true;
 
 			return scraper.scrape().then(function() {
-				should(saveResourceStub.callCount).be.eql(7);
-				should(handleErrorStub.callCount).be.eql(0);
+				should(loadToFsStub.callCount).be.eql(7);
+				should(handleErrorSpy.callCount).be.eql(0);
 			});
 		});
 	});

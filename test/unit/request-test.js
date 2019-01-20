@@ -2,19 +2,39 @@ const should = require('should');
 const nock = require('nock');
 const sinon = require('sinon');
 const proxyquire = require('proxyquire');
-const request = require('../../lib/request');
+const Request = require('../../lib/request');
 
-describe('request', () => {
+describe('Request', () => {
+
+	describe('constructor', () => {
+		it('should set passed responseHandler', () => {
+			let handler = sinon.stub();
+			let r = new Request({
+				httpResponseHandler: handler
+			});
+			should(r.handleResponse).be.eql(handler);
+		});
+
+		it('should set correct default handler and options if nothing passed', () => {
+			let r1 = new Request({});
+			should(r1.handleResponse).be.ok();
+			should(r1.handleResponse).be.instanceOf(Function);
+
+			let r2 = new Request();
+			should(r2.handleResponse).be.ok();
+			should(r2.handleResponse).be.instanceOf(Function);
+		});
+	});
 
 	describe('get', () => {
 
 		describe('using stubbed request', () => {
-			let requestStub, request, responseMock;
+			let requestStub, Request, responseMock;
 
 			beforeEach(() => {
 				responseMock = { request: {href: ''}, body: '', headers: {} };
 				requestStub = sinon.stub().yields(null, responseMock);
-				request = proxyquire('../../lib/request', {
+				Request = proxyquire('../../lib/request', {
 					'request': {
 						'get': requestStub
 					}
@@ -22,6 +42,7 @@ describe('request', () => {
 			});
 
 			it('should call request with correct params', () => {
+				const r = new Request({});
 				const options = {
 					headers: {
 						'User-Agent': 'Mozilla/5.0 (Linux; Android 4.2.1;'
@@ -29,7 +50,7 @@ describe('request', () => {
 				};
 				const url = 'http://www.google.com';
 
-				return request.get({url, options}).then(() => {
+				return r.get(url, null, options).then(() => {
 					const expectedOptions = {
 						headers: {
 							'User-Agent': 'Mozilla/5.0 (Linux; Android 4.2.1;'
@@ -43,10 +64,12 @@ describe('request', () => {
 			});
 
 			it('should add referer header if referer param was passed', () => {
+				let r = new Request({});
+
 				let url = 'http://www.google.com';
 				let referer = 'http://referer.com';
 
-				return request.get({url, referer}).then(() => {
+				return r.get(url, referer).then(() => {
 					let expectedOptions = {
 						headers: {
 							referer: referer
@@ -59,23 +82,29 @@ describe('request', () => {
 				});
 			});
 
-			it('should call afterResponse with correct params', () => {
+			it('should call handleResponse with correct params', () => {
 				let handlerStub = sinon.stub().resolves('');
+				let r = new Request({
+					httpResponseHandler: handlerStub
+				});
 
-				return request.get({url: 'http://example.com', afterResponse: handlerStub}).then(() => {
-					should(handlerStub.calledOnce).be.eql(true);
-					should(handlerStub.calledWith({response: responseMock})).be.eql(true);
+				return r.get('http://example.com').then(() => {
+					should(r.handleResponse.calledOnce).be.eql(true);
+					should(r.handleResponse.calledWith(responseMock)).be.eql(true);
 				});
 			});
 
-			describe('transformResult from afterResponse', () => {
+			describe('transformResult from handleResponse', () => {
 				it('should return object with body and metadata properties', () => {
 					let handlerStub = sinon.stub().resolves({
 						body: 'a',
 						metadata: 'b'
 					});
+					let r = new Request({
+						httpResponseHandler: handlerStub
+					});
 
-					return request.get({url: 'http://example.com', afterResponse: handlerStub}).then((data) => {
+					return r.get('http://example.com').then((data) => {
 						should(data.body).be.eql('a');
 						should(data.metadata).be.eql('b');
 					});
@@ -85,8 +114,11 @@ describe('request', () => {
 					let handlerStub = sinon.stub().resolves({
 						body: 'a'
 					});
+					let r = new Request({
+						httpResponseHandler: handlerStub
+					});
 
-					return request.get({url: 'http://example.com', afterResponse: handlerStub}).then((data) => {
+					return r.get('http://example.com').then((data) => {
 						should(data.body).be.eql('a');
 						should(data.metadata).be.eql(null);
 					});
@@ -94,8 +126,11 @@ describe('request', () => {
 
 				it('should transform string result', () => {
 					let handlerStub = sinon.stub().resolves('test body');
+					let r = new Request({
+						httpResponseHandler: handlerStub
+					});
 
-					return request.get({url: 'http://example.com', afterResponse: handlerStub}).then((data) => {
+					return r.get('http://example.com').then((data) => {
 						should(data.body).be.eql('test body');
 						should(data.metadata).be.eql(null);
 					});
@@ -103,12 +138,14 @@ describe('request', () => {
 
 				it('should be rejected if wrong result (no string nor object) returned', () => {
 					let handlerStub = sinon.stub().resolves(['1', '2']);
+					let r = new Request({
+						httpResponseHandler: handlerStub
+					});
 
-					return request.get({url: 'http://example.com', afterResponse: handlerStub}).then(() => {
+					return r.get('http://example.com').then(() => {
 						should(true).be.eql(false);
 					}).catch((e) => {
 						should(e).be.instanceOf(Error);
-						should(e.message).match(/Wrong response handler result. Expected string or object, but received/);
 					});
 				});
 			});
@@ -131,7 +168,7 @@ describe('request', () => {
 					'content-type': 'text/html; charset=utf-8'
 				});
 
-				return request.get({url}).then((data) => {
+				return new Request().get(url).then((data) => {
 					data.should.have.properties(['url', 'body', 'mimeType']);
 					data.url.should.be.eql('http://www.google.com/');
 					data.body.should.be.eql('Hello from Google!');
@@ -143,7 +180,7 @@ describe('request', () => {
 				let url = 'http://www.google.com';
 				nock(url).get('/').reply(200, 'Hello from Google!', {});
 
-				return request.get({url}).then((data) => {
+				return new Request().get(url).then((data) => {
 					data.should.have.properties(['url', 'body', 'mimeType']);
 					data.url.should.be.eql('http://www.google.com/');
 					data.body.should.be.eql('Hello from Google!');
